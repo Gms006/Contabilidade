@@ -1,0 +1,286 @@
+/* =============================================================================
+   NETO CONTABILIDADE - DESIGN SYSTEM
+   Paleta de cores baseada na identidade visual da empresa
+   ============================================================================= */
+
+/* Variáveis de cores */
+:root {
+    --nc-azul-escuro: #2D3E50;
+    --nc-azul-medio: #3A5068;
+    --nc-azul-claro: #4A6278;
+    --nc-dourado: #C9A96E;
+    --nc-dourado-claro: #D4BA85;
+    --nc-dourado-escuro: #B8985D;
+    --nc-branco: #FFFFFF;
+    --nc-cinza-claro: #F5F7FA;
+    --nc-cinza-medio: #E8ECF0;
+    --nc-texto: #2D3E50;
+    --nc-texto-secundario: #5A6978;
+    --nc-sucesso: #28A745;
+    --nc-erro: #DC3545;
+    --nc-alerta: #FFC107;
+}
+
+/* Reset e base */
+.stApp {
+    background-color: var(--nc-cinza-claro);
+}
+
+/* Header customizado */
+header[data-testid="stHeader"] {
+    background-color: var(--nc-azul-escuro);
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, var(--nc-azul-escuro) 0%, var(--nc-azul-medio) 100%);
+}
+
+section[data-testid="stSidebar"] .stMarkdown {
+    color: var(--nc-branco);
+}
+
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 {
+    color: var(--nc-dourado) !important;
+}
+
+section[data-testid="stSidebar"] .stRadio label {
+    color: var(--nc-branco) !important;
+}
+
+/* Cards de empresa */
+.empresa-card {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    border-left: 4px solid var(--nc-dourado);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.empresa-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+/* Botões primários */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, var(--nc-dourado) 0%, var(--nc-dourado-escuro) 100%);
+    border: none;
+    color: var(--nc-azul-escuro);
+    font-weight: 600;
+    padding: 12px 24px;
+    border-radius: 8px;
+    transition: all 0.3s;
+}
+
+.stButton > button[kind="primary"]:hover {
+    background: linear-gradient(135deg, var(--nc-dourado-claro) 0%, var(--nc-dourado) 100%);
+    box-shadow: 0 4px 15px rgba(201, 169, 110, 0.4);
+}
+
+/* Botões secundários */
+.stButton > button[kind="secondary"] {
+    background: var(--nc-azul-escuro);
+    border: 2px solid var(--nc-dourado);
+    color: var(--nc-dourado);
+    font-weight: 600;
+}
+
+.stButton > button[kind="secondary"]:hover {
+    background: var(--nc-dourado);
+    color: var(--nc-azul-escuro);
+}
+
+/* File uploader */
+.stFileUploader {
+    border: 2px dashed var(--nc-azul-medio);
+    border-radius: 12px;
+    padding: 20px;
+    background: var(--nc-branco);
+}
+
+.stFileUploader:hover {
+    border-color: var(--nc-dourado);
+    background: rgba(201, 169, 110, 0.05);
+}
+
+/* Métricas */
+.stMetric {
+    background: var(--nc-branco);
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.stMetric label {
+    color: var(--nc-texto-secundario) !important;
+    font-weight: 500;
+}
+
+.stMetric [data-testid="stMetricValue"] {
+    color: var(--nc-azul-escuro) !important;
+    font-weight: 700;
+}
+
+/* Tabelas / DataFrames */
+.stDataFrame {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Headers das tabelas */
+.stDataFrame thead th {
+    background: var(--nc-azul-escuro) !important;
+    color: var(--nc-branco) !important;
+    font-weight: 600;
+    padding: 12px 16px;
+}
+
+/* Alertas customizados */
+.stAlert[data-baseweb="notification"] {
+    border-radius: 12px;
+}
+
+/* Títulos */
+h1 {
+    color: var(--nc-azul-escuro) !important;
+    font-weight: 700;
+}
+
+h2, h3 {
+    color: var(--nc-azul-medio) !important;
+    font-weight: 600;
+}
+
+/* Dividers */
+hr {
+    border-color: var(--nc-cinza-medio);
+}
+
+/* Expanders */
+.streamlit-expanderHeader {
+    background: var(--nc-cinza-medio);
+    border-radius: 8px;
+    font-weight: 600;
+    color: var(--nc-azul-escuro);
+}
+
+/* Radio buttons */
+.stRadio > div {
+    background: var(--nc-branco);
+    padding: 12px;
+    border-radius: 8px;
+}
+
+/* Selectbox */
+.stSelectbox > div > div {
+    border-radius: 8px;
+}
+
+/* Mensagens de sucesso */
+.element-container .stSuccess {
+    background-color: rgba(40, 167, 69, 0.1);
+    border-left: 4px solid var(--nc-sucesso);
+    border-radius: 8px;
+}
+
+/* Mensagens de erro */
+.element-container .stError {
+    background-color: rgba(220, 53, 69, 0.1);
+    border-left: 4px solid var(--nc-erro);
+    border-radius: 8px;
+}
+
+/* Mensagens de aviso */
+.element-container .stWarning {
+    background-color: rgba(255, 193, 7, 0.1);
+    border-left: 4px solid var(--nc-alerta);
+    border-radius: 8px;
+}
+
+/* Info boxes */
+.element-container .stInfo {
+    background-color: rgba(45, 62, 80, 0.08);
+    border-left: 4px solid var(--nc-azul-escuro);
+    border-radius: 8px;
+}
+
+/* Download buttons */
+.stDownloadButton > button {
+    background: var(--nc-azul-escuro);
+    color: var(--nc-branco);
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.stDownloadButton > button:hover {
+    background: var(--nc-azul-medio);
+    box-shadow: 0 4px 15px rgba(45, 62, 80, 0.3);
+}
+
+/* Spinner */
+.stSpinner > div {
+    border-top-color: var(--nc-dourado) !important;
+}
+
+/* Footer */
+.footer-text {
+    text-align: center;
+    color: var(--nc-texto-secundario);
+    font-size: 0.85rem;
+    padding: 20px;
+    margin-top: 40px;
+    border-top: 1px solid var(--nc-cinza-medio);
+}
+
+/* Animações */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.5s ease-out;
+}
+
+/* Cards de status */
+.status-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 10px;
+    margin: 8px 0;
+}
+
+.status-card.success {
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.1) 0%, rgba(40, 167, 69, 0.05) 100%);
+    border: 1px solid rgba(40, 167, 69, 0.3);
+}
+
+.status-card.error {
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.1) 0%, rgba(220, 53, 69, 0.05) 100%);
+    border: 1px solid rgba(220, 53, 69, 0.3);
+}
+
+.status-card.warning {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.1) 0%, rgba(255, 193, 7, 0.05) 100%);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .empresa-card {
+        padding: 16px;
+    }
+    
+    .stMetric {
+        padding: 12px;
+    }
+}
