@@ -31,6 +31,14 @@ try:
         CONTA_TARIFA_SOMENTE,
         _get_pagamentos_exigem_316,
     )
+    from ui_components import (
+        render_status_header,
+        render_upload_section,
+        render_config_section,
+        render_validation_warnings,
+        render_results_summary,
+        render_quality_analysis
+    )
 except ImportError:
     from drogarias.services.parsing import load_payments, load_bank_split, load_chart_of_accounts
     from drogarias.services.matching import match_transactions, MatchParams
@@ -42,6 +50,14 @@ except ImportError:
         TARIFA_POR_CONTA_FORNECEDOR,
         CONTA_TARIFA_SOMENTE,
         _get_pagamentos_exigem_316,
+    )
+    from ui_components import (
+        render_status_header,
+        render_upload_section,
+        render_config_section,
+        render_validation_warnings,
+        render_results_summary,
+        render_quality_analysis
     )
 
 
@@ -125,23 +141,55 @@ def _gerar_exemplo_contas() -> bytes:
 def mostrar_pagina_drogarias():
     """Renderiza a pagina de conciliacao da Drogarias."""
 
-    st.title(" Conciliacao Financeira - Drogarias")
-    st.markdown("**Drogarias - Conciliacao de Pagamentos e Extratos**")
+    st.title("Conciliação Financeira - Drogarias")
+    st.markdown("**Drogarias - Conciliação de Pagamentos e Extratos**")
     st.divider()
 
     # ==========================================================================
-    # TABS PRINCIPAIS
+    # HEADER DE STATUS (sempre visível)
     # ==========================================================================
-    tabs = st.tabs([" Upload Arquivos", " Pre-visualizacao", " Conciliacao", " Qualidade", " Export CSV", " Validacoes"])
+    
+    # Obtém status dos arquivos (inicializa como False se não existir)
+    files_status = {
+        'pagamentos': 'drog_pag' in st.session_state and st.session_state.get('drog_pag') is not None,
+        'extrato': 'drog_ext' in st.session_state and st.session_state.get('drog_ext') is not None,
+        'contas': 'drog_contas' in st.session_state and st.session_state.get('drog_contas') is not None
+    }
+    
+    # Obtém resultados se já foram processados
+    results_data = None
+    if 'drog_csv_data' in st.session_state:
+        results_data = {
+            'csv_data': st.session_state['drog_csv_data'],
+            'csv_filename': st.session_state.get('drog_csv_filename', 'conciliacao.csv'),
+            'stats': st.session_state.get('drog_pend_data', {}).get('stats', {}),
+            'taxa': st.session_state.get('drog_pend_data', {}).get('stats', {}).get('pct_conciliacao', 0)
+        }
+    
+    # Renderiza header
+    action = render_status_header(files_status, results_data)
+    
+    if action == "process":
+        # Marca para processar (será capturado na aba)
+        st.session_state['trigger_process'] = True
+    
+    st.divider()
 
     # ==========================================================================
-    # ABA 0 - UPLOAD DE ARQUIVOS
+    # TABS PRINCIPAIS - NOVA ESTRUTURA (3 ABAS)
+    # ==========================================================================
+    tabs = st.tabs(["🏠 Processo", "📊 Resultados", "⚙️ Avançado"])
+
+    # ==========================================================================
+    # ABA 0 - PROCESSO (Upload + Configuração)
     # ==========================================================================
     with tabs[0]:
-        st.header(" Upload de Arquivos")
-        st.markdown("Faca o upload dos arquivos necessarios para a conciliacao.")
+        st.header("🏠 Processo de Conciliação")
+        st.markdown("Faça o upload dos arquivos e configure os parâmetros.")
         st.divider()
 
+        # Upload de arquivos
+        st.subheader("📁 Upload de Arquivos")
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -255,43 +303,49 @@ def mostrar_pagina_drogarias():
 
         st.divider()
 
-        # Status dos arquivos
-        st.subheader(" Status dos Arquivos")
-        col_st1, col_st2, col_st3 = st.columns(3)
-        with col_st1:
-            if up_pag:
-                st.success(" Pagamentos OK")
-            else:
-                st.error(" Pagamentos pendente")
-        with col_st2:
-            if up_ext:
-                st.success(" Extrato OK")
-            else:
-                st.error(" Extrato pendente")
-        with col_st3:
-            if up_contas:
-                st.success(" Contas OK")
-            else:
-                st.error(" Contas pendente")
-
+        # Pré-visualização dos dados (expansível)
         if up_pag and up_ext and up_contas:
-            st.success(" **Todos os arquivos carregados! Navegue para as proximas abas.**")
-            btn = st.button(" Conciliar e Gerar CSV", type="primary", key="drog_btn")
+            with st.expander("👁️ Pré-visualizar Dados Carregados", expanded=False):
+                try:
+                    df_pag_preview, _ = load_payments(up_pag)
+                    df_ext_preview, _, _ = load_bank_split(up_ext)
+                    df_contas_preview, _ = load_chart_of_accounts(up_contas)
+                    
+                    tab1, tab2, tab3 = st.tabs(["Pagamentos", "Extrato", "Contas"])
+                    with tab1:
+                        st.dataframe(df_pag_preview.head(10), use_container_width=True)
+                    with tab2:
+                        st.dataframe(df_ext_preview.head(10), use_container_width=True)
+                    with tab3:
+                        st.dataframe(df_contas_preview.head(10), use_container_width=True)
+                except Exception as e:
+                    st.error(f"Erro ao pré-visualizar: {e}")
+        
+        # Botão interno de processar (alternativa ao header)
+        if up_pag and up_ext and up_contas:
+            st.success("✓ Todos os arquivos carregados!")
+            if st.button("🚀 PROCESSAR CONCILIAÇÃO", type="primary", key="drog_btn_internal", use_container_width=True):
+                st.session_state['trigger_process'] = True
+                st.rerun()
         else:
-            st.warning(" Faca upload de todos os arquivos para continuar.")
-            btn = False
+            st.info("↑ Faça upload de todos os arquivos para continuar")
 
     # ==========================================================================
-    # PROCESSAR ARQUIVOS (se todos carregados)
+    # PROCESSAR ARQUIVOS (se todos carregados e botão clicado)
     # ==========================================================================
-    if up_pag and up_ext and up_contas:
+    if up_pag and up_ext and up_contas and (st.session_state.get('trigger_process') or st.session_state.get('drog_btn_internal')):
+        # Limpa o trigger
+        if 'trigger_process' in st.session_state:
+            del st.session_state['trigger_process']
+        
         try:
-            df_pag, cols_pag = load_payments(up_pag)
-            df_ext_saidas, df_ext_entradas, cols_ext = load_bank_split(up_ext)
-            df_contas, cols_contas = load_chart_of_accounts(up_contas)
+            with st.spinner("Processando conciliação..."):
+                df_pag, cols_pag = load_payments(up_pag)
+                df_ext_saidas, df_ext_entradas, cols_ext = load_bank_split(up_ext)
+                df_contas, cols_contas = load_chart_of_accounts(up_contas)
 
-            # Validacao
-            validation_result = validate_accounts(
+                # Validacao
+                validation_result = validate_accounts(
                 df_pag, cols_pag, df_contas, banco_padrao, conta_caixa,
                 df_ext_entradas=df_ext_entradas, df_ext_saidas=df_ext_saidas
             )
@@ -491,14 +545,21 @@ def mostrar_pagina_drogarias():
                         if not entries.empty:
                             buf = BytesIO()
                             entries.to_csv(buf, index=False, sep=";", encoding="utf-8-sig")
+                            csv_data = buf.getvalue()
+                            
+                            # Salva no session_state para o header
+                            st.session_state['drog_csv_data'] = csv_data
+                            st.session_state['drog_csv_filename'] = "lancamentos_contabeis_drogarias.csv"
+                            
                             st.download_button(
-                                " **Baixar CSV Final**",
-                                data=buf.getvalue(),
+                                "⬇️ **Baixar CSV Final**",
+                                data=csv_data,
                                 file_name="lancamentos_contabeis_drogarias.csv",
                                 mime="text/csv",
                                 type="primary",
+                                use_container_width=True
                             )
-                            st.success(" **CSV gerado com sucesso!**")
+                            st.success("✓ **CSV gerado com sucesso!**")
 
                     except Exception as e:
                         st.error(f" Erro ao gerar CSV: {e}")
