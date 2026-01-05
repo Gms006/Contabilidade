@@ -91,28 +91,80 @@ def load_payments(file, payments_month_first: bool = True) -> tuple[pd.DataFrame
     Lê a planilha de pagamentos no layout:
       Data pagamento | Nome do fornecedor | Nota fiscal | Valor | Multa e juros | [Descontos] | Valor a pagar
     'Descontos' é opcional e vira 0 quando ausente.
+    
+    Usa busca flexível de colunas (case-insensitive e variações).
 
     payments_month_first:
         True  -> interpreta '07/01/2025' como 01/jul/2025 (MM/DD/AAAA)
         False -> interpreta '07/01/2025' como 07/jan/2025 (DD/MM/AAAA)
     """
-    required = [
-        "Data pagamento",
-        "Nome do fornecedor",
-        "Nota fiscal",
-        "Valor",
-        "Multa e juros",
-        "Valor a pagar",
-    ]
     df = pd.read_excel(file, engine="openpyxl")
-
-    missing = [c for c in required if c not in df.columns]
+    
+    # Mapeamento flexível de colunas
+    col_data = _find_column_flexible(df, [
+        "data pagamento", "data de pagamento", "data_pagamento", "dt_pagamento", 
+        "data pag", "dt pag", "data", "date"
+    ])
+    col_fornecedor = _find_column_flexible(df, [
+        "nome do fornecedor", "fornecedor", "nome fornecedor", "razao social", 
+        "razão social", "nome", "supplier"
+    ])
+    col_nota = _find_column_flexible(df, [
+        "nota fiscal", "nf", "nota", "num nota", "numero nota", "nf-e", 
+        "numero nf", "doc", "documento"
+    ])
+    col_valor = _find_column_flexible(df, [
+        "valor", "vlr", "valor titulo", "valor do titulo", "value", "amount"
+    ])
+    col_multa = _find_column_flexible(df, [
+        "multa e juros", "multa juros", "juros", "multa", "acrescimos", "acréscimos"
+    ])
+    col_valor_pagar = _find_column_flexible(df, [
+        "valor a pagar", "valor pagar", "vlr pagar", "valor pago", "vlr pago", 
+        "valor liquido", "valor líquido", "total"
+    ])
+    col_descontos = _find_column_flexible(df, [
+        "descontos", "desconto", "desc", "abatimentos", "abatimento"
+    ])
+    
+    # Validação: colunas essenciais devem existir
+    missing = []
+    if col_data is None:
+        missing.append("Data pagamento (ou variações: data de pagamento, data_pagamento, data pag)")
+    if col_fornecedor is None:
+        missing.append("Nome do fornecedor (ou variações: fornecedor, razao social)")
+    if col_nota is None:
+        missing.append("Nota fiscal (ou variações: nf, nota, numero nota)")
+    if col_valor is None:
+        missing.append("Valor (ou variações: vlr, valor titulo)")
+    if col_multa is None:
+        missing.append("Multa e juros (ou variações: multa juros, juros, acrescimos)")
+    if col_valor_pagar is None:
+        missing.append("Valor a pagar (ou variações: valor pagar, valor pago, valor liquido)")
+    
     if missing:
-        raise ValueError(f"Pagamentos.xlsx sem colunas obrigatórias: {missing}")
+        raise ValueError(
+            f"Pagamentos.xlsx sem colunas obrigatórias: {', '.join(missing)}.\n"
+            f"Colunas encontradas: {list(df.columns)}"
+        )
+    
+    # Renomeia para o padrão interno
+    rename_map = {
+        col_data: "Data pagamento",
+        col_fornecedor: "Nome do fornecedor",
+        col_nota: "Nota fiscal",
+        col_valor: "Valor",
+        col_multa: "Multa e juros",
+        col_valor_pagar: "Valor a pagar"
+    }
+    
+    # Adiciona descontos ao mapa se existir
+    if col_descontos:
+        rename_map[col_descontos] = "Descontos"
+    
+    df = df.rename(columns=rename_map).copy()
 
-    df = df.copy()
-
-    # Coluna opcional
+    # Coluna opcional: se não existir, cria
     if "Descontos" not in df.columns:
         df["Descontos"] = 0
 
@@ -249,15 +301,52 @@ def load_chart_of_accounts(file) -> tuple[pd.DataFrame, dict]:
     Lê o plano de contas com colunas:
       CONTAS CONTABEIS | NOME | CLASSIFICAÇÃO | HISTORICO
     Normaliza chaves para uso pelos mapas (accounting.build_maps).
+    
+    Usa busca flexível de colunas (case-insensitive e variações).
     """
-    required = ["CONTAS CONTABEIS", "NOME", "CLASSIFICAÇÃO", "HISTORICO"]
     df = pd.read_excel(file, engine="openpyxl")
-
-    missing = [c for c in required if c not in df.columns]
+    
+    # Mapeamento flexível de colunas
+    col_conta = _find_column_flexible(df, [
+        "contas contabeis", "contas contábeis", "conta contabil", "conta contábil",
+        "codigo conta", "código conta", "conta", "account", "cod_conta"
+    ])
+    col_nome = _find_column_flexible(df, [
+        "nome", "descricao", "descrição", "desc", "description", "name"
+    ])
+    col_classif = _find_column_flexible(df, [
+        "classificacao", "classificação", "classif", "class", "tipo", "category"
+    ])
+    col_historico = _find_column_flexible(df, [
+        "historico", "histórico", "hist", "history", "observacao", "observação", "obs"
+    ])
+    
+    # Validação: colunas essenciais devem existir
+    missing = []
+    if col_conta is None:
+        missing.append("CONTAS CONTABEIS (ou variações: conta contabil, codigo conta)")
+    if col_nome is None:
+        missing.append("NOME (ou variações: descricao, description)")
+    if col_classif is None:
+        missing.append("CLASSIFICAÇÃO (ou variações: classificacao, tipo)")
+    if col_historico is None:
+        missing.append("HISTORICO (ou variações: histórico, observacao)")
+    
     if missing:
-        raise ValueError(f"Contas Contábeis.xlsx sem colunas obrigatórias: {missing}")
-
-    df = df.copy()
+        raise ValueError(
+            f"Contas Contábeis.xlsx sem colunas obrigatórias: {', '.join(missing)}.\n"
+            f"Colunas encontradas: {list(df.columns)}"
+        )
+    
+    # Renomeia para o padrão interno
+    rename_map = {
+        col_conta: "CONTAS CONTABEIS",
+        col_nome: "NOME",
+        col_classif: "CLASSIFICAÇÃO",
+        col_historico: "HISTORICO"
+    }
+    df = df.rename(columns=rename_map).copy()
+    
     df["_nome_norm"] = df["NOME"].map(_clean_text)
     df["_class_norm"] = df["CLASSIFICAÇÃO"].map(_clean_text)
 
