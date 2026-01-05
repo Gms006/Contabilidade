@@ -122,16 +122,28 @@ def mostrar_pagina_tradicao():
 
     st.title(" Conciliacao Contabil - Tradicao")
     st.markdown("**Tradicao Comercio e Servicos LTDA**")
+    
+    # Botão de download CSV no topo
+    if 'trad_csv_data' in st.session_state:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.download_button(
+                label="📥 BAIXAR CSV FINAL",
+                data=st.session_state['trad_csv_data'],
+                file_name=st.session_state.get('trad_csv_filename', 'lancamentos_tradicao.csv'),
+                mime="text/csv",
+                type="primary",
+                use_container_width=True
+            )
+    
     st.divider()
 
     # ==========================================================================
     # TABS PRINCIPAIS
     # ==========================================================================
-    tabs = st.tabs([" Upload Arquivos", " Pre-visualizacao", " Conciliacao", " Resultado", " Export CSV", " Nao Classificados"])
+    tabs = st.tabs(["🏠 Processo", "📊 Resultados", "⚙️ Avançado"])
 
-    # ==========================================================================
-    # ABA 0 - UPLOAD DE ARQUIVOS
-    # ==========================================================================
+    # ====== TAB 0: PROCESSO ======
     with tabs[0]:
         st.header(" Upload de Arquivos")
         st.markdown("Faca o upload dos arquivos necessarios para a conciliacao.")
@@ -328,225 +340,192 @@ def mostrar_pagina_tradicao():
             st.error(f" Erro na leitura: {e}")
             contas = None
             movimentacao = None
-        else:
-            # ====== PRE-VISUALIZACAO ======
-            with tabs[1]:
-                st.header(" Pre-visualizacao dos Dados")
 
-                qtd_sicoob = len(movimentacao.get('pag_sicoob', pd.DataFrame()))
-                qtd_bb = len(movimentacao.get('pag_bb', pd.DataFrame()))
-                qtd_caixa = len(movimentacao.get('caixa_saidas', pd.DataFrame()))
-
-                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-                with col_m1:
-                    st.metric("Fornecedores", len(contas.get('financeiro', [])))
-                with col_m2:
-                    st.metric("Pag. SICOOB", qtd_sicoob)
-                with col_m3:
-                    st.metric("Pag. BB", qtd_bb)
-                with col_m4:
-                    st.metric("Pag. Caixa", qtd_caixa)
-
-                st.divider()
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.subheader(" Movimentacao SICOOB")
-                    df_pag_sicoob = movimentacao.get('pag_sicoob', pd.DataFrame())
-                    if not df_pag_sicoob.empty:
-                        st.dataframe(df_pag_sicoob.head(10), use_container_width=True)
-                    else:
-                        st.info("Sem dados")
-
-                    st.subheader(" Movimentacao BB")
-                    df_pag_bb = movimentacao.get('pag_bb', pd.DataFrame())
-                    if not df_pag_bb.empty:
-                        st.dataframe(df_pag_bb.head(10), use_container_width=True)
-                    else:
-                        st.info("Sem dados")
-
-                with col2:
-                    st.subheader(" Extrato SICOOB")
-                    if df_extrato_sicoob is not None and not df_extrato_sicoob.empty:
-                        st.dataframe(df_extrato_sicoob.head(10), use_container_width=True)
-                    else:
-                        st.info("Sem extrato SICOOB")
-
-                    st.subheader(" Extrato BB")
-                    if df_extrato_bb is not None and not df_extrato_bb.empty:
-                        st.dataframe(df_extrato_bb.head(10), use_container_width=True)
-                    else:
-                        st.info("Sem extrato BB")
-
-            # ====== BOTAO: CONCILIAR/GERAR ======
-            if btn:
-                with st.spinner("Processando conciliacao..."):
-                    try:
-                        df_resultado, nao_encontrados = conciliar_tradicao(
-                            df_extrato_sicoob=df_extrato_sicoob,
-                            df_extrato_bb=df_extrato_bb,
-                            movimentacao=movimentacao,
-                            contas=contas
-                        )
-                        st.session_state['trad_resultado'] = df_resultado
-                        st.session_state['trad_nao_encontrados'] = nao_encontrados
-                    except Exception as e:
-                        st.error(f" Erro ao processar: {e}")
-                        import traceback
+        # Lógica do botão CONCILIAR
+        if btn:
+            with st.spinner("Processando conciliação..."):
+                try:
+                    from tradicao.conciliador import conciliar_tradicao
+                    
+                    df_resultado, nao_encontrados = conciliar_tradicao(
+                        df_extrato_sicoob=df_extrato_sicoob,
+                        df_extrato_bb=df_extrato_bb,
+                        movimentacao=movimentacao,
+                        contas=contas
+                    )
+                    
+                    # Salvar no session_state
+                    st.session_state['trad_resultado'] = df_resultado
+                    st.session_state['trad_nao_encontrados'] = nao_encontrados
+                    st.session_state['trad_df_pag'] = movimentacao  # Para tab avançado
+                    st.session_state['trad_df_contas'] = contas
+                    
+                    if df_extrato_sicoob is not None:
+                        st.session_state['trad_df_ext_sicoob'] = df_extrato_sicoob
+                    if df_extrato_bb is not None:
+                        st.session_state['trad_df_ext_bb'] = df_extrato_bb
+                    
+                    # Gerar CSV
+                    if not df_resultado.empty:
+                        buf = BytesIO()
+                        df_resultado.to_csv(buf, index=False, sep=";", encoding="utf-8-sig")
+                        csv_data = buf.getvalue()
+                        
+                        st.session_state['trad_csv_data'] = csv_data
+                        st.session_state['trad_csv_filename'] = "lancamentos_contabeis_tradicao.csv"
+                        
+                        st.success("✓ **CSV gerado com sucesso!** Use o botão BAIXAR CSV no topo da página.")
+                    
+                except Exception as e:
+                    st.error(f"❌ Erro ao processar: {e}")
+                    import traceback
+                    with st.expander("🔍 Detalhes do Erro"):
                         st.code(traceback.format_exc())
 
-            # ====== CONCILIACAO ======
-            with tabs[2]:
-                if 'trad_resultado' in st.session_state:
-                    df_resultado = st.session_state['trad_resultado']
-                    nao_encontrados = st.session_state.get('trad_nao_encontrados', [])
+    # ====== TAB 1: RESULTADOS ======
+    with tabs[1]:
+        if 'trad_resultado' in st.session_state:
+            df_resultado = st.session_state['trad_resultado']
+            nao_encontrados = st.session_state.get('trad_nao_encontrados', [])
 
-                    total_lanc = len(df_resultado)
-                    total_nao_enc = len(nao_encontrados)
+            # Dashboard de métricas
+            st.subheader("📊 Dashboard de Conciliação")
+            
+            total_lanc = len(df_resultado)
+            total_nao_enc = len(nao_encontrados)
+            total_ok = total_lanc - total_nao_enc
+            pct_ok = (total_ok / total_lanc * 100) if total_lanc > 0 else 0
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("✓ Classificados", total_ok)
+            with col2:
+                st.metric("📄 Total Lançamentos", total_lanc)
+            with col3:
+                st.metric("❓ Não Classificados", total_nao_enc)
+            with col4:
+                st.metric("🎯 Taxa Classificação", f"{pct_ok:.1f}%")
 
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric(" Lancamentos Gerados", total_lanc)
-                    with col2:
-                        st.metric(" Nao Classificados", total_nao_enc)
-                    with col3:
-                        taxa = round((total_lanc / (total_lanc + total_nao_enc) * 100), 1) if (total_lanc + total_nao_enc) > 0 else 0
-                        st.metric(" Taxa Sucesso", f"{taxa}%")
-                    with col4:
-                        if total_nao_enc == 0:
-                            st.success(" Pronto")
-                        else:
-                            st.warning(" Pendencias")
+            st.divider()
 
-                    if not df_resultado.empty and '_tipo' in df_resultado.columns:
-                        tipos = df_resultado['_tipo'].value_counts()
-                        for tipo, qtd in tipos.items():
-                            st.write(f"**{tipo}**: {qtd} lancamentos")
+            # Resultado
+            st.subheader("📊 Lançamentos Classificados")
+            if not df_resultado.empty:
+                # Mostrar preview
+                st.dataframe(df_resultado.head(20), use_container_width=True, height=400)
+                st.caption(f"Mostrando 20 de {len(df_resultado)} lançamentos")
+            else:
+                st.info("Nenhum lançamento processado")
+
+            st.divider()
+
+            # Não encontrados
+            if nao_encontrados:
+                st.subheader(f"⚠️ Lançamentos Não Classificados ({len(nao_encontrados)})")
+                st.warning("Os itens abaixo não foram encontrados no plano de contas:")
+                for item in nao_encontrados[:20]:  # Mostrar primeiros 20
+                    st.write(f"• {item}")
+                if len(nao_encontrados) > 20:
+                    st.caption(f"... e mais {len(nao_encontrados) - 20} itens")
+            else:
+                st.success("✓ Todos os lançamentos foram classificados!")
+
+            st.divider()
+
+            # Análise de qualidade
+            st.subheader("📈 Análise de Qualidade")
+            
+            if pct_ok >= 95:
+                st.success(f"✓ **Excelente**: {pct_ok:.1f}% dos lançamentos classificados")
+                st.caption("A maioria dos lançamentos foram classificados com sucesso.")
+            elif pct_ok >= 85:
+                st.warning(f"⚠ **Bom**: {pct_ok:.1f}% dos lançamentos classificados")
+                st.caption("Alguns lançamentos precisam de atenção.")
+            else:
+                st.error(f"✗ **Crítico**: Apenas {pct_ok:.1f}% dos lançamentos classificados")
+                st.caption("Muitos lançamentos não foram classificados. Revise o plano de contas.")
+                
+        else:
+            st.info("📁 Faça upload de todos os arquivos e clique em **PROCESSAR** na aba Processo para ver os resultados.")
+
+    # ====== TAB 2: AVANÇADO ======
+    with tabs[2]:
+        if "trad_df_pag" in st.session_state:
+            st.header("⚙️ Configurações Avançadas")
+            
+            # Validações de Cadastros
+            if "trad_validation_result" in st.session_state:
+                validation_result = st.session_state["trad_validation_result"]
+                
+                st.subheader("🔍 Validação de Cadastros")
+                
+                if validation_result and validation_result.get("tem_bloqueadores"):
+                    st.error("⚠️ **PROBLEMAS DETECTADOS** - Corrija antes de exportar")
+                    
+                    if validation_result.get("fornecedores_faltantes"):
+                        with st.expander(
+                            f"❌ Fornecedores sem Conta ({len(validation_result['fornecedores_faltantes'])})",
+                            expanded=True
+                        ):
+                            for forn in validation_result["fornecedores_faltantes"]:
+                                st.warning(f"• {forn}")
+                    
+                    if validation_result.get("clientes_faltantes"):
+                        with st.expander(
+                            f"❌ Clientes sem Conta ({len(validation_result['clientes_faltantes'])})",
+                            expanded=True
+                        ):
+                            for cli in validation_result["clientes_faltantes"]:
+                                st.warning(f"• {cli}")
+                    
+                    if validation_result.get("contas_especiais_faltantes"):
+                        with st.expander(
+                            f"❌ Contas Especiais Faltantes ({len(validation_result['contas_especiais_faltantes'])})",
+                            expanded=True
+                        ):
+                            for conta in validation_result["contas_especiais_faltantes"]:
+                                st.error(f"• {conta}")
                 else:
-                    st.info(" Clique em Conciliar e Gerar CSV na aba Upload para processar.")
-
-            # ====== RESULTADO ======
-            with tabs[3]:
-                if 'trad_resultado' in st.session_state:
-                    df_resultado = st.session_state['trad_resultado']
-
-                    if not df_resultado.empty:
-                        export_df = df_resultado.drop(columns="_tipo", errors="ignore")
-
-                        st.subheader(" Previa do CSV Final")
-                        st.dataframe(export_df.head(30), use_container_width=True)
-
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            total_debitos = export_df[export_df['Cod Conta Debito'] != '']['Valor'].apply(
-                                lambda x: float(str(x).replace(',', '.')) if x else 0
-                            ).sum()
-                            st.metric("Total Debitos", f"R$ {_fmt_val(total_debitos)}")
-                        with col2:
-                            total_creditos = export_df[export_df['Cod Conta Credito'] != '']['Valor'].apply(
-                                lambda x: float(str(x).replace(',', '.')) if x else 0
-                            ).sum()
-                            st.metric("Total Creditos", f"R$ {_fmt_val(total_creditos)}")
-                        with col3:
-                            st.metric("Total Lancamentos", len(export_df))
-                    else:
-                        st.warning("Nenhum lancamento gerado.")
-                else:
-                    st.info(" Clique em Conciliar e Gerar CSV na aba Upload para processar.")
-
-            # ====== EXPORT CSV ======
-            with tabs[4]:
-                if 'trad_resultado' in st.session_state:
-                    df_resultado = st.session_state['trad_resultado']
-                    nao_encontrados = st.session_state.get('trad_nao_encontrados', [])
-
-                    if nao_encontrados:
-                        st.error(f" **EXPORTACAO BLOQUEADA** - {len(nao_encontrados)} lancamentos nao classificados!")
-                        st.warning("Cadastre as contas na aba Nao Classificados e processe novamente.")
-                    elif not df_resultado.empty:
-                        export_df = df_resultado.drop(columns="_tipo", errors="ignore")
-                        st.success(" Pronto para exportar!")
-
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            csv_data = export_df.to_csv(sep=";", index=False, encoding="utf-8-sig").encode("utf-8-sig")
-                            st.download_button(
-                                " **Baixar CSV Final**",
-                                data=csv_data,
-                                file_name="conciliacao_tradicao.csv",
-                                mime="text/csv",
-                                type="primary"
-                            )
-                        with col2:
-                            buffer = BytesIO()
-                            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                                export_df.to_excel(writer, index=False, sheet_name="Conciliacao")
-                            st.download_button(
-                                " Baixar Excel",
-                                data=buffer.getvalue(),
-                                file_name="conciliacao_tradicao.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                    else:
-                        st.warning("Nenhum lancamento para exportar.")
-                else:
-                    st.info(" Clique em Conciliar e Gerar CSV na aba Upload para processar.")
-
-            # ====== NAO CLASSIFICADOS ======
-            with tabs[5]:
-                if 'trad_nao_encontrados' in st.session_state:
-                    nao_encontrados = st.session_state['trad_nao_encontrados']
-
-                    if nao_encontrados:
-                        st.error(f" {len(nao_encontrados)} lancamentos nao foram classificados!")
-                        st.markdown("**Cadastre as contas contabeis para os seguintes lancamentos:**")
-
-                        df_nao_encontrados = pd.DataFrame(nao_encontrados)
-                        st.dataframe(df_nao_encontrados, use_container_width=True)
-
-                        st.subheader(" Resumo por Tipo")
-                        tipos = df_nao_encontrados['Tipo'].value_counts()
-                        for tipo, qtd in tipos.items():
-                            st.write(f" **{tipo}**: {qtd}")
-
-                        csv_nao_enc = df_nao_encontrados.to_csv(sep=";", index=False, encoding="utf-8-sig")
+                    st.success("✓ Todas as validações passaram!")
+            
+            st.divider()
+            
+            # Pré-visualização expandida dos dados
+            st.subheader("📋 Pré-visualização dos Dados")
+            
+            if "trad_df_pag" in st.session_state:
+                with st.expander("💳 Pagamentos (completo)", expanded=False):
+                    df_pag = st.session_state["trad_df_pag"]
+                    st.dataframe(df_pag, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_pag)} registros")
+            
+            if "trad_df_ext_saidas" in st.session_state:
+                with st.expander("📤 Extrato - Saídas (completo)", expanded=False):
+                    df_saidas = st.session_state["trad_df_ext_saidas"]
+                    st.dataframe(df_saidas, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_saidas)} registros")
+            
+            if "trad_df_ext_entradas" in st.session_state:
+                with st.expander("📥 Extrato - Entradas (completo)", expanded=False):
+                    df_entradas = st.session_state["trad_df_ext_entradas"]
+                    st.dataframe(df_entradas, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_entradas)} registros")
+                    
+                    if not df_entradas.empty:
+                        buf = BytesIO()
+                        df_entradas.to_csv(buf, index=False, sep=";", encoding="utf-8-sig")
                         st.download_button(
-                            " Baixar nao classificados",
-                            data=csv_nao_enc.encode("utf-8-sig"),
-                            file_name="lancamentos_nao_classificados.csv",
+                            "⬇️ Baixar Entradas CSV",
+                            data=buf.getvalue(),
+                            file_name="entradas_extrato.csv",
                             mime="text/csv"
                         )
-
-                        with st.expander(" Como corrigir"):
-                            st.markdown("""
-                            1. **Fornecedores**: Cadastre na aba FINANCEIRO da planilha de Contas Contabeis
-                            2. **Tarifas**: Cadastre na aba do banco correspondente (SICOOB ou BANCO DO BRASIL)
-                            3. **Entradas**: Cadastre clientes ou contas de receita
-                            4. Apos cadastrar, recarregue os arquivos e processe novamente
-                            """)
-                    else:
-                        st.success(" **Todos os lancamentos foram classificados!**")
-                        st.balloons()
-                else:
-                    st.info(" Clique em Conciliar e Gerar CSV na aba Upload para processar.")
-
-    else:
-        for i in range(1, 6):
-            with tabs[i]:
-                st.warning(" Faca upload de todos os arquivos na aba Upload Arquivos para continuar.")
-                
-                if i == 1:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.info("""
-                        **Arquivos necessarios:**
-                        - Contas Contabeis.xlsx (FINANCEIRO, BANCO DO BRASIL, SICOOB)
-                        - Movimentacao.xlsx (PAG SICOOB, PAG BB, CAIXA EMPRESA)
-                        - Pelo menos um extrato bancario (SICOOB ou BB)
-                        """)
-                    with col2:
-                        st.info("""
-                        **Formatos aceitos:**
-                        - Excel (.xlsx)
-                        - PDF (se disponivel)
-                        """)
+            
+            if "trad_df_contas" in st.session_state:
+                with st.expander("📊 Plano de Contas (completo)", expanded=False):
+                    df_contas = st.session_state["trad_df_contas"]
+                    st.dataframe(df_contas, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_contas)} contas")
+                    
+        else:
+            st.info("📁 Faça upload de todos os arquivos na aba **Processo** para acessar configurações avançadas.")

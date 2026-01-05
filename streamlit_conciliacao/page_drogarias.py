@@ -10,8 +10,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import os
-import sys
 from io import BytesIO
 import unicodedata
 
@@ -22,6 +20,7 @@ import pandas as pd
 try:
     from drogarias.services.parsing import load_payments, load_bank_split, load_chart_of_accounts
     from drogarias.services.matching import match_transactions, MatchParams
+    from services.standardize_extract import standardize_bank_extract, detect_if_needs_standardization
     from drogarias.services.accounting import (
         build_entries,
         validate_accounts,
@@ -30,14 +29,6 @@ try:
         TARIFA_POR_CONTA_FORNECEDOR,
         CONTA_TARIFA_SOMENTE,
         _get_pagamentos_exigem_316,
-    )
-    from ui_components import (
-        render_status_header,
-        render_upload_section,
-        render_config_section,
-        render_validation_warnings,
-        render_results_summary,
-        render_quality_analysis
     )
 except ImportError:
     from drogarias.services.parsing import load_payments, load_bank_split, load_chart_of_accounts
@@ -50,14 +41,6 @@ except ImportError:
         TARIFA_POR_CONTA_FORNECEDOR,
         CONTA_TARIFA_SOMENTE,
         _get_pagamentos_exigem_316,
-    )
-    from ui_components import (
-        render_status_header,
-        render_upload_section,
-        render_config_section,
-        render_validation_warnings,
-        render_results_summary,
-        render_quality_analysis
     )
 
 
@@ -141,55 +124,34 @@ def _gerar_exemplo_contas() -> bytes:
 def mostrar_pagina_drogarias():
     """Renderiza a pagina de conciliacao da Drogarias."""
 
-    st.title("Conciliação Financeira - Drogarias")
-    st.markdown("**Drogarias - Conciliação de Pagamentos e Extratos**")
-    st.divider()
-
-    # ==========================================================================
-    # HEADER DE STATUS (sempre visível)
-    # ==========================================================================
+    st.title(" Conciliacao Financeira - Drogarias")
+    st.markdown("**Drogarias - Conciliacao de Pagamentos e Extratos**")
     
-    # Obtém status dos arquivos (inicializa como False se não existir)
-    files_status = {
-        'pagamentos': 'drog_pag' in st.session_state and st.session_state.get('drog_pag') is not None,
-        'extrato': 'drog_ext' in st.session_state and st.session_state.get('drog_ext') is not None,
-        'contas': 'drog_contas' in st.session_state and st.session_state.get('drog_contas') is not None
-    }
-    
-    # Obtém resultados se já foram processados
-    results_data = None
+    # Botão de download CSV no topo - DESTAQUE
     if 'drog_csv_data' in st.session_state:
-        results_data = {
-            'csv_data': st.session_state['drog_csv_data'],
-            'csv_filename': st.session_state.get('drog_csv_filename', 'conciliacao.csv'),
-            'stats': st.session_state.get('drog_pend_data', {}).get('stats', {}),
-            'taxa': st.session_state.get('drog_pend_data', {}).get('stats', {}).get('pct_conciliacao', 0)
-        }
-    
-    # Renderiza header
-    action = render_status_header(files_status, results_data)
-    
-    if action == "process":
-        # Marca para processar (será capturado na aba)
-        st.session_state['trigger_process'] = True
+        st.success("✅ CSV gerado com sucesso!")
+        st.download_button(
+            label="📥 BAIXAR CSV FINAL",
+            data=st.session_state['drog_csv_data'],
+            file_name=st.session_state.get('drog_csv_filename', 'lancamentos_drogarias.csv'),
+            mime="text/csv",
+            type="primary",
+            use_container_width=True
+        )
     
     st.divider()
 
     # ==========================================================================
-    # TABS PRINCIPAIS - NOVA ESTRUTURA (3 ABAS)
+    # TABS PRINCIPAIS
     # ==========================================================================
     tabs = st.tabs(["🏠 Processo", "📊 Resultados", "⚙️ Avançado"])
 
-    # ==========================================================================
-    # ABA 0 - PROCESSO (Upload + Configuração)
-    # ==========================================================================
+    # ====== TAB 0: PROCESSO ======
     with tabs[0]:
-        st.header("🏠 Processo de Conciliação")
-        st.markdown("Faça o upload dos arquivos e configure os parâmetros.")
+        st.header(" Upload de Arquivos")
+        st.markdown("Faca o upload dos arquivos necessarios para a conciliacao.")
         st.divider()
 
-        # Upload de arquivos
-        st.subheader("📁 Upload de Arquivos")
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -209,14 +171,52 @@ def mostrar_pagina_drogarias():
         with col2:
             st.subheader(" Extrato Bancario")
             st.caption("Extrato do banco Sicoob")
+            
+            # Checkbox para padronização automática
+            auto_padronizar = st.checkbox(
+                "📋 Padronizar extrato automaticamente",
+                value=True,
+                key="drog_auto_pad",
+                help="Se o extrato estiver no formato bruto do banco, ele será padronizado automaticamente"
+            )
+            
             up_ext = st.file_uploader(
                 "Extrato Sicoob.xlsx",
                 type=["xlsx", "xlsm"],
                 key="drog_ext",
-                help="Extrato bancario do Sicoob"
+                help="Extrato bancario do Sicoob (pode ser bruto ou já padronizado)"
             )
+            
             if up_ext:
-                st.success(f" {up_ext.name}")
+                # Guarda o nome original do arquivo
+                original_name = up_ext.name
+                
+                # Verifica se precisa padronizar
+                if auto_padronizar:
+                    try:
+                        # Reseta o ponteiro do arquivo
+                        up_ext.seek(0)
+                        
+                        if detect_if_needs_standardization(up_ext):
+                            with st.spinner("Padronizando extrato..."):
+                                up_ext.seek(0)
+                                extrato_padronizado = standardize_bank_extract(up_ext, original_name)
+                                
+                                # Substitui o arquivo original pelo padronizado
+                                up_ext = extrato_padronizado
+                                
+                                st.success(f"✅ {original_name} (padronizado)")
+                                st.info("💡 Extrato foi padronizado automaticamente")
+                        else:
+                            st.success(f" {original_name}")
+                            st.info("ℹ️ Extrato já está no formato correto")
+                    except Exception as e:
+                        st.error(f"❌ Erro ao padronizar: {str(e)}")
+                        st.warning("⚠️ Usando extrato original sem padronização")
+                        up_ext.seek(0)
+                        st.success(f" {original_name}")
+                else:
+                    st.success(f" {original_name}")
             else:
                 st.warning(" Aguardando arquivo...")
 
@@ -236,336 +236,270 @@ def mostrar_pagina_drogarias():
 
         st.divider()
 
-        # ======================================================================
-        # PLANILHAS EXEMPLO
-        # ======================================================================
-        st.subheader(" Planilhas Exemplo")
-        st.info("""
-        **IMPORTANTE:** Baixe as planilhas exemplo abaixo para entender o formato correto dos arquivos.
-        Seus arquivos devem seguir **exatamente** estas estruturas de colunas para que o sistema funcione corretamente.
-        """)
-
-        col_ex1, col_ex2, col_ex3 = st.columns(3)
-
-        with col_ex1:
-            st.markdown("**Pagamentos**")
-            st.caption("Colunas: DATA, FORNECEDOR, NF, VALOR, MULTA E JUROS, DESCONTO")
-            st.download_button(
-                " Baixar Exemplo",
-                data=_gerar_exemplo_pagamentos(),
-                file_name="EXEMPLO_Pagamentos.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="ex_pag"
-            )
-
-        with col_ex2:
-            st.markdown("**Extrato Bancario**")
-            st.caption("Abas: Saidas e Entradas. Colunas: DATA, HISTORICO, VALOR, TIPO")
-            st.download_button(
-                " Baixar Exemplo",
-                data=_gerar_exemplo_extrato(),
-                file_name="EXEMPLO_Extrato_Sicoob.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="ex_ext"
-            )
-
-        with col_ex3:
-            st.markdown("**Contas Contabeis**")
-            st.caption("Colunas: NOME, CONTAS CONTABEIS, HISTORICO, CLASSIFICACAO")
-            st.download_button(
-                " Baixar Exemplo",
-                data=_gerar_exemplo_contas(),
-                file_name="EXEMPLO_Contas_Contabeis.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="ex_contas"
-            )
-
-        st.divider()
-
-        # Configuracoes
-        st.subheader(" Configuracoes")
-        col_cfg1, col_cfg2 = st.columns(2)
-        with col_cfg1:
-            banco_padrao = st.text_input("Banco padrao (CAIXA E EQUIVALENTES)", value="Sicoob", key="drog_banco")
-        with col_cfg2:
-            conta_caixa = st.text_input("Conta Caixa (CAIXA E EQUIVALENTES)", value="Caixa", key="drog_caixa")
-
-        st.subheader(" Parametros de Matching")
-        col_match1, col_match2 = st.columns(2)
-        with col_match1:
-            strict_matching = st.checkbox(
-                "Matching rigoroso (Data + Valor exatos)", value=True,
-                help="Se desmarcado, permite tolerancia de dias",
-                key="drog_strict"
-            )
-        with col_match2:
-            tolerance_days = 0 if strict_matching else st.slider("Tolerancia em dias", 0, 7, 2, key="drog_tol")
-
-        st.divider()
-
-        # Pré-visualização dos dados (expansível)
+        # Status e Botão PROCESSAR
         if up_pag and up_ext and up_contas:
-            with st.expander("👁️ Pré-visualizar Dados Carregados", expanded=False):
-                try:
-                    df_pag_preview, _ = load_payments(up_pag)
-                    df_ext_preview, _, _ = load_bank_split(up_ext)
-                    df_contas_preview, _ = load_chart_of_accounts(up_contas)
-                    
-                    tab1, tab2, tab3 = st.tabs(["Pagamentos", "Extrato", "Contas"])
-                    with tab1:
-                        st.dataframe(df_pag_preview.head(10), use_container_width=True)
-                    with tab2:
-                        st.dataframe(df_ext_preview.head(10), use_container_width=True)
-                    with tab3:
-                        st.dataframe(df_contas_preview.head(10), use_container_width=True)
-                except Exception as e:
-                    st.error(f"Erro ao pré-visualizar: {e}")
-        
-        # Botão interno de processar (alternativa ao header)
-        if up_pag and up_ext and up_contas:
-            st.success("✓ Todos os arquivos carregados!")
-            if st.button("🚀 PROCESSAR CONCILIAÇÃO", type="primary", key="drog_btn_internal", use_container_width=True):
-                st.session_state['trigger_process'] = True
-                st.rerun()
+            st.success("✅ **Todos os arquivos carregados!**")
+            btn = st.button("🚀 CONCILIAR E GERAR CSV", type="primary", key="drog_btn", use_container_width=True)
         else:
-            st.info("↑ Faça upload de todos os arquivos para continuar")
+            st.warning("⚠️ Faça upload de todos os arquivos para continuar.")
+            btn = False
+
+        st.divider()
+
+        # Configurações Avançadas
+        with st.expander("⚙️ Configurações Avançadas", expanded=False):
+            col_cfg1, col_cfg2 = st.columns(2)
+            with col_cfg1:
+                banco_padrao = st.text_input("Banco padrão (CAIXA E EQUIVALENTES)", value="Sicoob", key="drog_banco")
+            with col_cfg2:
+                conta_caixa = st.text_input("Conta Caixa (CAIXA E EQUIVALENTES)", value="Caixa", key="drog_caixa")
+ 
+            st.subheader("📊 Parâmetros de Matching")
+            col_match1, col_match2 = st.columns(2)
+            with col_match1:
+                strict_matching = st.checkbox(
+                    "Matching rigoroso (Data + Valor exatos)", value=True,
+                    help="Se desmarcado, permite tolerância de dias",
+                    key="drog_strict"
+                )
+            with col_match2:
+                tolerance_days = 0 if strict_matching else st.slider("Tolerância em dias", 0, 7, 2, key="drog_tol")
 
     # ==========================================================================
-    # PROCESSAR ARQUIVOS (se todos carregados e botão clicado)
+    # PROCESSAR ARQUIVOS (se todos carregados)
     # ==========================================================================
-    if up_pag and up_ext and up_contas and (st.session_state.get('trigger_process') or st.session_state.get('drog_btn_internal')):
-        # Limpa o trigger
-        if 'trigger_process' in st.session_state:
-            del st.session_state['trigger_process']
-        
+    if up_pag and up_ext and up_contas:
         try:
-            with st.spinner("Processando conciliação..."):
-                df_pag, cols_pag = load_payments(up_pag)
-                df_ext_saidas, df_ext_entradas, cols_ext = load_bank_split(up_ext)
-                df_contas, cols_contas = load_chart_of_accounts(up_contas)
+            df_pag, cols_pag = load_payments(up_pag)
+            df_ext_saidas, df_ext_entradas, cols_ext = load_bank_split(up_ext)
+            df_contas, cols_contas = load_chart_of_accounts(up_contas)
 
-                # Validacao
-                validation_result = validate_accounts(
+            # Salvar no session_state para usar nas tabs
+            st.session_state['drog_df_pag'] = df_pag
+            st.session_state['drog_cols_pag'] = cols_pag
+            st.session_state['drog_df_ext_saidas'] = df_ext_saidas
+            st.session_state['drog_df_ext_entradas'] = df_ext_entradas
+            st.session_state['drog_cols_ext'] = cols_ext
+            st.session_state['drog_df_contas'] = df_contas
+            st.session_state['drog_banco_padrao'] = banco_padrao
+            st.session_state['drog_conta_caixa'] = conta_caixa
+
+            # Validacao
+            validation_result = validate_accounts(
                 df_pag, cols_pag, df_contas, banco_padrao, conta_caixa,
                 df_ext_entradas=df_ext_entradas, df_ext_saidas=df_ext_saidas
             )
+            st.session_state['drog_validation_result'] = validation_result
 
-        except Exception as e:
-            st.error(f" Erro na leitura: {e}")
-            validation_result = None
-        else:
-            # ====== PRE-VISUALIZACAO ======
-            with tabs[1]:
-                st.header(" Pre-visualizacao dos Dados")
-                
-                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-                with col_m1:
-                    st.metric("Pagamentos", len(df_pag))
-                with col_m2:
-                    st.metric("Saidas Extrato", len(df_ext_saidas))
-                with col_m3:
-                    st.metric("Entradas Extrato", len(df_ext_entradas))
-                with col_m4:
-                    if validation_result and validation_result["tem_bloqueadores"]:
-                        st.metric("Problemas", validation_result['total_problemas'], delta="Corrigir!")
-                    else:
-                        st.metric("Validacao", "OK")
-
-                st.divider()
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.subheader(" Pagamentos (amostra)")
-                    st.dataframe(df_pag.head(10), use_container_width=True)
-                    st.subheader(" Extrato Saidas (amostra)")
-                    st.dataframe(df_ext_saidas.head(10), use_container_width=True)
-                with col2:
-                    st.subheader(" Extrato Entradas (amostra)")
-                    st.dataframe(df_ext_entradas.head(10), use_container_width=True)
-                    st.subheader(" Contas Contabeis (amostra)")
-                    st.dataframe(df_contas.head(10), use_container_width=True)
-
-            # ====== VALIDACOES ======
-            with tabs[5]:
-                st.subheader(" Validacao de Cadastros")
-
-                if validation_result is None:
-                    st.error("Erro na validacao - verifique os arquivos carregados")
-                elif validation_result["tem_bloqueadores"]:
-                    st.error(" **EXPORTACAO BLOQUEADA** - Corrija os problemas abaixo:")
-
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Total de Problemas", validation_result["total_problemas"], delta=None)
-
-                    if validation_result["fornecedores_faltantes"]:
-                        st.subheader(" Fornecedores sem Conta Cadastrada")
-                        for fornecedor in validation_result["fornecedores_faltantes"]:
-                            st.write(f" **{fornecedor}**")
-
-                    if validation_result["clientes_faltantes"]:
-                        st.subheader(" Clientes sem Conta Cadastrada")
-                        for cliente in validation_result["clientes_faltantes"]:
-                            st.write(f" **{cliente}**")
-
-                    problemas_especiais = []
-                    if validation_result["banco_padrao_faltante"]:
-                        problemas_especiais.append(f"Banco padrao: {validation_result['banco_padrao_faltante']}")
-                    if validation_result["caixa_faltante"]:
-                        problemas_especiais.append(f"Conta Caixa: {validation_result['caixa_faltante']}")
-                    if validation_result["precisa_multas_juros"]:
-                        problemas_especiais.append("Conta para MULTAS E JUROS")
-                    if validation_result["precisa_descontos"]:
-                        problemas_especiais.append("Conta para DESCONTOS")
-                    if problemas_especiais:
-                        st.subheader(" Contas Especiais Faltantes")
-                        for problema in problemas_especiais:
-                            st.write(f" **{problema}**")
-
-                    if validation_result.get("precisa_tarifa"):
-                        st.subheader(" Problema com TARIFA - Conta 316 Nao Encontrada")
-                        st.warning(f"Cadastre a conta **{CONTA_TARIFA_SOMENTE}** com CLASSIFICACAO = MULTAS E JUROS")
-
-                else:
-                    st.success(" **Todas as validacoes aprovadas!**")
-                    st.success(" O sistema esta pronto para gerar o CSV!")
-
-            # ====== BOTAO: CONCILIAR/GERAR ======
+            # Lógica do botão CONCILIAR
             if btn:
-                if validation_result and validation_result["tem_bloqueadores"]:
-                    st.error(" **Nao e possivel conciliar!** Corrija os problemas na aba Validacoes.")
+                if validation_result and validation_result.get("tem_bloqueadores"):
+                    st.error("⚠️ **Não é possível conciliar!** Corrija os problemas na aba Avançado.")
                     st.stop()
 
+                # Fazer matching
                 params = MatchParams(
                     strict_date_matching=strict_matching,
                     tolerance_days=tolerance_days,
                 )
                 matches, pend_data = match_transactions(df_pag, df_ext_saidas, cols_pag, cols_ext, params)
 
+                # Salvar no session_state
                 st.session_state['drog_matches'] = matches
                 st.session_state['drog_pend_data'] = pend_data
-                st.session_state['drog_df_pag'] = df_pag
-                st.session_state['drog_cols_pag'] = cols_pag
-                st.session_state['drog_df_ext_saidas'] = df_ext_saidas
-                st.session_state['drog_cols_ext'] = cols_ext
-                st.session_state['drog_df_contas'] = df_contas
-                st.session_state['drog_df_ext_entradas'] = df_ext_entradas
-                st.session_state['drog_banco_padrao'] = banco_padrao
-                st.session_state['drog_conta_caixa'] = conta_caixa
 
-            # ====== CONCILIACAO ======
-            with tabs[2]:
-                if 'drog_matches' in st.session_state:
-                    matches = st.session_state['drog_matches']
-                    pend_data = st.session_state['drog_pend_data']
-                    cols_pag = st.session_state['drog_cols_pag']
-                    cols_ext = st.session_state['drog_cols_ext']
+                # Gerar CSV
+                try:
+                    entries = build_entries(
+                        matches, df_pag, cols_pag, df_ext_saidas, cols_ext, df_contas,
+                        df_ext_entradas=df_ext_entradas, banco_padrao=banco_padrao,
+                        conta_caixa_nome=conta_caixa, gerar_pendentes=True,
+                    )
 
-                    stats = pend_data.get("stats", {})
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric(" Conciliados", stats.get("matches", 0))
-                    with col2:
-                        st.metric(" Total Pagamentos", stats.get("total_pagamentos", 0))
-                    with col3:
-                        st.metric(" Saidas Extrato", stats.get("total_saidas", 0))
-                    with col4:
-                        st.metric(" Taxa Conciliacao", f"{stats.get('pct_conciliacao', 0):.1f}%")
+                    if not entries.empty:
+                        buf = BytesIO()
+                        entries.to_csv(buf, index=False, sep=";", encoding="utf-8-sig")
+                        csv_data = buf.getvalue()
 
-                    st.subheader(" Grupos Conciliados")
-                    if not matches.empty:
-                        st.dataframe(matches, use_container_width=True)
-                    else:
-                        st.info("Nenhum match encontrado")
+                        # Salvar CSV no session_state
+                        st.session_state['drog_csv_data'] = csv_data
+                        st.session_state['drog_csv_filename'] = "lancamentos_contabeis_drogarias.csv"
 
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader(f" Pagamentos Pendentes: {len(pend_data['unmatched_pagamentos'])}")
-                        if not pend_data["unmatched_pagamentos"].empty:
-                            st.dataframe(pend_data["unmatched_pagamentos"][["_data", "_valor", cols_pag["fornecedor"]]], use_container_width=True)
+                        st.success("✅ CSV gerado com sucesso! Use o botão 'BAIXAR CSV' no topo da página.")
 
-                    with col2:
-                        st.subheader(f" Saidas sem Pagamento: {len(pend_data['unmatched_extrato'])}")
-                        if not pend_data["unmatched_extrato"].empty:
-                            st.dataframe(pend_data["unmatched_extrato"][["_data", "_valor", cols_ext["historico"]]], use_container_width=True)
+                except Exception as e:
+                    st.error(f"❌ Erro ao gerar CSV: {e}")
+
+        except Exception as e:
+            st.error(f"❌ Erro na leitura: {e}")
+            import traceback
+            with st.expander("🔍 Detalhes do Erro"):
+                st.code(traceback.format_exc())
+
+    # ====== TAB 1: RESULTADOS ======
+    with tabs[1]:
+        if 'drog_matches' in st.session_state:
+            matches = st.session_state['drog_matches']
+            pend_data = st.session_state['drog_pend_data']
+            cols_pag = st.session_state['drog_cols_pag']
+            cols_ext = st.session_state['drog_cols_ext']
+
+            # Dashboard de métricas
+            stats = pend_data.get("stats", {})
+            st.subheader("📊 Dashboard de Conciliação")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("✓ Conciliados", stats.get("matches", 0))
+            with col2:
+                st.metric("📄 Total Pagamentos", stats.get("total_pagamentos", 0))
+            with col3:
+                st.metric("💳 Saídas Extrato", stats.get("total_saidas", 0))
+            with col4:
+                pct = stats.get('pct_conciliacao', 0)
+                delta_color = "normal" if pct >= 90 else "inverse"
+                st.metric("🎯 Taxa Conciliação", f"{pct:.1f}%")
+
+            st.divider()
+
+            # Grupos conciliados
+            st.subheader("✓ Grupos Conciliados")
+            if not matches.empty:
+                st.dataframe(matches, use_container_width=True, height=300)
+            else:
+                st.info("Nenhum match encontrado")
+
+            st.divider()
+
+            # Pendências lado a lado
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader(f"⏳ Pagamentos Pendentes: {len(pend_data['unmatched_pagamentos'])}")
+                if not pend_data["unmatched_pagamentos"].empty:
+                    st.dataframe(
+                        pend_data["unmatched_pagamentos"][["_data", "_valor", cols_pag["fornecedor"]]],
+                        use_container_width=True,
+                        height=300
+                    )
                 else:
-                    st.info(" Clique em Conciliar e Gerar CSV na aba Upload para processar.")
+                    st.success("Todos os pagamentos foram conciliados!")
 
-            # ====== QUALIDADE ======
-            with tabs[3]:
-                if 'drog_pend_data' in st.session_state:
-                    pend_data = st.session_state['drog_pend_data']
-                    stats = pend_data.get("stats", {})
-                    st.subheader(" Analise de Qualidade")
-
-                    if stats.get("pct_conciliacao", 0) >= 95:
-                        st.success(f" **Excelente**: Taxa de {stats.get('pct_conciliacao', 0):.1f}%")
-                    elif stats.get("pct_conciliacao", 0) >= 85:
-                        st.warning(f" **Bom**: Taxa de {stats.get('pct_conciliacao', 0):.1f}%")
-                    else:
-                        st.error(f" **Critico**: Taxa de apenas {stats.get('pct_conciliacao', 0):.1f}%")
-
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric(" Pagamentos pelo Caixa", len(pend_data['unmatched_pagamentos']))
-                        st.metric(" Saidas nao identificadas", len(pend_data['unmatched_extrato']))
+            with col2:
+                st.subheader(f"❓ Saídas sem Pagamento: {len(pend_data['unmatched_extrato'])}")
+                if not pend_data["unmatched_extrato"].empty:
+                    st.dataframe(
+                        pend_data["unmatched_extrato"][["_data", "_valor", cols_ext["historico"]]],
+                        use_container_width=True,
+                        height=300
+                    )
                 else:
-                    st.info(" Clique em Conciliar e Gerar CSV na aba Upload para processar.")
+                    st.success("Todas as saídas foram identificadas!")
 
-            # ====== EXPORT CSV ======
-            with tabs[4]:
-                if 'drog_matches' in st.session_state:
-                    matches = st.session_state['drog_matches']
+            st.divider()
+
+            # Análise de qualidade
+            st.subheader("📈 Análise de Qualidade")
+            pct_conciliacao = stats.get("pct_conciliacao", 0)
+            
+            if pct_conciliacao >= 95:
+                st.success(f"✓ **Excelente**: Taxa de conciliação de {pct_conciliacao:.1f}%")
+                st.caption("A maioria dos lançamentos foram conciliados com sucesso.")
+            elif pct_conciliacao >= 85:
+                st.warning(f"⚠ **Bom**: Taxa de conciliação de {pct_conciliacao:.1f}%")
+                st.caption("Há algumas pendências que merecem atenção.")
+            else:
+                st.error(f"✗ **Crítico**: Taxa de apenas {pct_conciliacao:.1f}%")
+                st.caption("Muitos lançamentos não foram conciliados. Revise os dados.")
+                
+        else:
+            st.info("📁 Faça upload de todos os arquivos e clique em **PROCESSAR** na aba Processo para ver os resultados.")
+
+    # ====== TAB 2: AVANÇADO ======
+    with tabs[2]:
+        if 'drog_df_pag' in st.session_state:
+            st.header("⚙️ Configurações Avançadas")
+            
+            # Validações de Cadastros
+            if 'drog_validation_result' in st.session_state:
+                validation_result = st.session_state['drog_validation_result']
+                
+                st.subheader("🔍 Validação de Cadastros")
+                
+                if validation_result and validation_result.get("tem_bloqueadores"):
+                    st.error("⚠️ **PROBLEMAS DETECTADOS** - Corrija antes de exportar")
+                    
+                    # Fornecedores faltantes
+                    if validation_result.get("fornecedores_faltantes"):
+                        with st.expander(
+                            f"❌ Fornecedores sem Conta ({len(validation_result['fornecedores_faltantes'])})",
+                            expanded=True
+                        ):
+                            for forn in validation_result['fornecedores_faltantes']:
+                                st.warning(f"• {forn}")
+                    
+                    # Clientes faltantes
+                    if validation_result.get("clientes_faltantes"):
+                        with st.expander(
+                            f"❌ Clientes sem Conta ({len(validation_result['clientes_faltantes'])})",
+                            expanded=True
+                        ):
+                            for cli in validation_result['clientes_faltantes']:
+                                st.warning(f"• {cli}")
+                    
+                    # Contas especiais faltantes
+                    if validation_result.get("contas_especiais_faltantes"):
+                        with st.expander(
+                            f"❌ Contas Especiais Faltantes ({len(validation_result['contas_especiais_faltantes'])})",
+                            expanded=True
+                        ):
+                            for conta in validation_result['contas_especiais_faltantes']:
+                                st.error(f"• {conta}")
+                else:
+                    st.success("✓ Todas as validações passaram!")
+            
+            st.divider()
+            
+            # Pré-visualização expandida dos dados
+            st.subheader("📋 Pré-visualização dos Dados")
+            
+            # Pagamentos
+            if 'drog_df_pag' in st.session_state:
+                with st.expander("💳 Pagamentos (completo)", expanded=False):
                     df_pag = st.session_state['drog_df_pag']
-                    cols_pag = st.session_state['drog_cols_pag']
-                    df_ext_saidas = st.session_state['drog_df_ext_saidas']
-                    cols_ext = st.session_state['drog_cols_ext']
-                    df_contas = st.session_state['drog_df_contas']
-                    df_ext_entradas = st.session_state['drog_df_ext_entradas']
-                    banco_padrao = st.session_state['drog_banco_padrao']
-                    conta_caixa = st.session_state['drog_conta_caixa']
-
-                    try:
-                        entries = build_entries(
-                            matches, df_pag, cols_pag, df_ext_saidas, cols_ext, df_contas,
-                            df_ext_entradas=df_ext_entradas, banco_padrao=banco_padrao,
-                            conta_caixa_nome=conta_caixa, gerar_pendentes=True,
+                    st.dataframe(df_pag, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_pag)} registros")
+            
+            # Extrato - Saídas
+            if 'drog_df_ext_saidas' in st.session_state:
+                with st.expander("📤 Extrato - Saídas (completo)", expanded=False):
+                    df_saidas = st.session_state['drog_df_ext_saidas']
+                    st.dataframe(df_saidas, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_saidas)} registros")
+            
+            # Extrato - Entradas
+            if 'drog_df_ext_entradas' in st.session_state:
+                with st.expander("📥 Extrato - Entradas (completo)", expanded=False):
+                    df_entradas = st.session_state['drog_df_ext_entradas']
+                    st.dataframe(df_entradas, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_entradas)} registros")
+                    
+                    # Botão para baixar entradas
+                    if not df_entradas.empty:
+                        buf = BytesIO()
+                        df_entradas.to_csv(buf, index=False, sep=";", encoding="utf-8-sig")
+                        st.download_button(
+                            "⬇️ Baixar Entradas CSV",
+                            data=buf.getvalue(),
+                            file_name="entradas_extrato.csv",
+                            mime="text/csv"
                         )
-
-                        st.subheader(" Previa do CSV Final")
-                        st.dataframe(entries.head(20), use_container_width=True)
-
-                        col1, col2 = st.columns(4)[:2]
-                        with col1:
-                            st.metric(" Total de Linhas", len(entries))
-                        with col2:
-                            linhas_com_valor = len(entries[entries["Valor pago"].astype(str).str.strip() != ""])
-                            st.metric(" Linhas com Valor", linhas_com_valor)
-
-                        if not entries.empty:
-                            buf = BytesIO()
-                            entries.to_csv(buf, index=False, sep=";", encoding="utf-8-sig")
-                            csv_data = buf.getvalue()
-                            
-                            # Salva no session_state para o header
-                            st.session_state['drog_csv_data'] = csv_data
-                            st.session_state['drog_csv_filename'] = "lancamentos_contabeis_drogarias.csv"
-                            
-                            st.download_button(
-                                "⬇️ **Baixar CSV Final**",
-                                data=csv_data,
-                                file_name="lancamentos_contabeis_drogarias.csv",
-                                mime="text/csv",
-                                type="primary",
-                                use_container_width=True
-                            )
-                            st.success("✓ **CSV gerado com sucesso!**")
-
-                    except Exception as e:
-                        st.error(f" Erro ao gerar CSV: {e}")
-                else:
-                    st.info(" Clique em Conciliar e Gerar CSV na aba Upload para processar.")
-    else:
-        for i in range(1, 6):
-            with tabs[i]:
-                st.warning(" Faca upload de todos os arquivos na aba Upload Arquivos para continuar.")
+            
+            # Plano de contas
+            if 'drog_df_contas' in st.session_state:
+                with st.expander("📊 Plano de Contas (completo)", expanded=False):
+                    df_contas = st.session_state['drog_df_contas']
+                    st.dataframe(df_contas, use_container_width=True, height=400)
+                    st.caption(f"Total: {len(df_contas)} contas")
+                    
+        else:
+            st.info("📁 Faça upload de todos os arquivos na aba **Processo** para acessar configurações avançadas.")
