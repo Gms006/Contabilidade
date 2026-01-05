@@ -190,32 +190,44 @@ def mostrar_pagina_drogarias():
             if up_ext:
                 # Guarda o nome original do arquivo
                 original_name = up_ext.name
-                
+
                 # Verifica se precisa padronizar
                 if auto_padronizar:
                     try:
                         # Reseta o ponteiro do arquivo
                         up_ext.seek(0)
-                        
+
                         if detect_if_needs_standardization(up_ext):
                             with st.spinner("Padronizando extrato..."):
                                 up_ext.seek(0)
                                 extrato_padronizado = standardize_bank_extract(up_ext, original_name)
                                 
+                                # Salva no session_state para usar depois
+                                st.session_state['drog_extrato_padronizado'] = extrato_padronizado
+                                st.session_state['drog_extrato_padronizado_nome'] = original_name
+
                                 # Substitui o arquivo original pelo padronizado
                                 up_ext = extrato_padronizado
-                                
+
                                 st.success(f"✅ {original_name} (padronizado)")
                                 st.info("💡 Extrato foi padronizado automaticamente")
                         else:
+                            # Marca que não precisa padronizar
+                            if 'drog_extrato_padronizado' in st.session_state:
+                                del st.session_state['drog_extrato_padronizado']
                             st.success(f" {original_name}")
                             st.info("ℹ️ Extrato já está no formato correto")
                     except Exception as e:
                         st.error(f"❌ Erro ao padronizar: {str(e)}")
                         st.warning("⚠️ Usando extrato original sem padronização")
+                        if 'drog_extrato_padronizado' in st.session_state:
+                            del st.session_state['drog_extrato_padronizado']
                         up_ext.seek(0)
                         st.success(f" {original_name}")
                 else:
+                    # Desativa padronização
+                    if 'drog_extrato_padronizado' in st.session_state:
+                        del st.session_state['drog_extrato_padronizado']
                     st.success(f" {original_name}")
             else:
                 st.warning(" Aguardando arquivo...")
