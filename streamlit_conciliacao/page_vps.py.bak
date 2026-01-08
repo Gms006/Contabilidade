@@ -1,0 +1,443 @@
+# -*- coding: utf-8 -*-
+"""
+Página Streamlit para conciliação contábil da VPS METALÚRGICA
+"""
+
+from __future__ import annotations
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import io
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Dict, Optional, List
+
+import pandas as pd
+import streamlit as st
+
+from vps.conciliador_vps import conciliar_vps
+from vps.utils_vps import (
+    carregar_contas_contabeis,
+    carregar_lancamentos,
+    carregar_extratos,
+    fmt_valor,
+)
+
+
+# ============== Helpers locais (UI) ==============
+def _fmt_val(v: float) -> str:
+    return f"{float(v):0.2f}".replace(".", ",")
+
+
+# ============== PLANILHAS EXEMPLO ==============
+def _gerar_exemplo_contas_contabeis() -> bytes:
+    """Gera planilha exemplo de Contas Contábeis com 4 abas."""
+    # Aba RELATORIO FINANCEIRO - fornecedores
+    df_financeiro = pd.DataFrame({
+        'LANCAMENTOS': ['FORNECEDOR ABC LTDA', 'DISTRIBUIDORA XYZ', 'ATACADO NORTE', 'SERVICOS GERAIS'],
+        'CONTAS': [101, 102, 103, 104],
+        'HISTORICO': [34, 34, 34, 34],
+    })
+    # Aba SICOOB - cadastro por histórico
+    df_sicoob = pd.DataFrame({
+        'LANCAMENTOS': ['TARIFA MENSAL', 'IOF', 'PIX RECEBIDO', 'TED RECEBIDA'],
+        'CONTAS': [170, 171, 5, 5],
+        'Historico': [11, 11, 2, 2],
+    })
+    # Aba BRADESCO - cadastro por histórico
+    df_bradesco = pd.DataFrame({
+        'LANCAMENTOS': ['TARIFA PACOTE', 'DEB PACOTE SERVICOS', 'PIX RECEBIDO', 'DEPOSITO'],
+        'CONTAS': [170, 170, 5, 5],
+        'Historico': [11, 11, 2, 9],
+    })
+    # Aba SICREDI - cadastro por histórico
+    df_sicredi = pd.DataFrame({
+        'LANCAMENTOS': ['TARIFA MENSAL', 'TAC', 'TED RECEBIDA', 'PIX RECEBIDO'],
+        'CONTAS': [170, 170, 5, 5],
+        'Historico': [11, 11, 2, 2],
+    })
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df_financeiro.to_excel(writer, index=False, sheet_name='RELATORIO FINANCEIRO')
+        df_sicoob.to_excel(writer, index=False, sheet_name='SICOOB')
+        df_bradesco.to_excel(writer, index=False, sheet_name='BRADESCO')
+        df_sicredi.to_excel(writer, index=False, sheet_name='SICREDI')
+    return buffer.getvalue()
+
+
+def _gerar_exemplo_lancamentos() -> bytes:
+    """Gera planilha exemplo de Lançamentos."""
+    df = pd.DataFrame({
+        'FORNECEDOR': ['FORNECEDOR ABC LTDA', 'DISTRIBUIDORA XYZ', 'ATACADO NORTE'],
+        'NF': ['12345', '67890', '11111'],
+        'Vencimento ': ['01/11/2025', '02/11/2025', '03/11/2025'],
+        'Valor R$': [1500.00, 2300.50, 890.00],
+        'Juros e multas': [0.00, 15.50, 0.00],
+        'Valor pago': [1500.00, 2316.00, 890.00],
+        'Forma de Pagamento ': ['PIX', 'BOLETO', 'PIX'],
+        'Data de \npagamento': ['01/11/2025', '02/11/2025', '03/11/2025'],
+        'PAGAMENTO': ['SICOOB', 'BRADESCO', 'SICREDI'],
+    })
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='LANCAMENTOS')
+    return buffer.getvalue()
+
+
+def _gerar_exemplo_extratos() -> bytes:
+    """Gera planilha exemplo de Extratos."""
+    df = pd.DataFrame({
+        'DATA': ['01/11/2025', '02/11/2025', '03/11/2025', '04/11/2025', '05/11/2025'],
+        'HISTORICO': ['PIX ENVIADO FORNECEDOR ABC', 'PAG BOLETO DISTRIBUIDORA', 'TED ENVIADA ATACADO', 'TARIFA PACOTE SERVICOS', 'PIX RECEBIDO CLIENTE'],
+        'VALOR': ['1.500,00D', '2.316,00D', '890,00D', '45,00D', '800,00C'],
+    })
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='EXTRATOS')
+    return buffer.getvalue()
+
+
+# ============== PAGINA VPS ==============
+def mostrar_pagina_vps():
+    """Renderiza a página de conciliação da VPS METALÚRGICA."""
+
+    st.title("🏭 Conciliação Contábil - VPS METALÚRGICA")
+    st.markdown("**VPS METALÚRGICA**")
+    st.divider()
+
+    # ==========================================================================
+    # TABS PRINCIPAIS
+    # ==========================================================================
+    tabs = st.tabs(["📤 Upload Arquivos", "👁️ Pré-visualização", "🔄 Conciliação", "📊 Resultado", "💾 Export CSV", "⚠️ Não Classificados"])
+
+    # ==========================================================================
+    # ABA 0 - UPLOAD DE ARQUIVOS
+    # ==========================================================================
+    with tabs[0]:
+        st.header("📤 Upload de Arquivos")
+        st.markdown("Faça o upload dos arquivos necessários para a conciliação.")
+        st.divider()
+
+        # Arquivos Base
+        st.subheader("📁 Arquivos Base")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Contas Contábeis**")
+            st.caption("Planilha com as abas: RELATORIO FINANCEIRO, SICOOB, BRADESCO, SICREDI")
+            contas_file = st.file_uploader(
+                "Contas Contábeis.xlsx",
+                type=["xlsx"],
+                key="vps_contas",
+                help="Planilha com mapeamento de fornecedores e históricos bancários para contas contábeis"
+            )
+            st.download_button(
+                "📥 Baixar Exemplo",
+                data=_gerar_exemplo_contas_contabeis(),
+                file_name="exemplo_contas_contabeis_vps.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with col2:
+            st.markdown("**Lançamentos**")
+            st.caption("Planilha financeira com os pagamentos realizados")
+            lancamentos_file = st.file_uploader(
+                "Lançamentos.xlsx",
+                type=["xlsx"],
+                key="vps_lancamentos",
+                help="Planilha com fornecedor, NF, valores, datas e banco de pagamento"
+            )
+            st.download_button(
+                "📥 Baixar Exemplo",
+                data=_gerar_exemplo_lancamentos(),
+                file_name="exemplo_lancamentos_vps.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        st.divider()
+
+        # Extratos
+        st.subheader("🏦 Extratos Bancários")
+        st.markdown("**Extrato Consolidado**")
+        st.caption("Planilha única com todas as movimentações dos bancos (SICOOB, BRADESCO, SICREDI)")
+        extratos_file = st.file_uploader(
+            "Extratos.xlsx",
+            type=["xlsx"],
+            key="vps_extratos",
+            help="Planilha com Data, Histórico e Valor (formato C/D ou +/-)"
+        )
+        st.download_button(
+            "📥 Baixar Exemplo",
+            data=_gerar_exemplo_extratos(),
+            file_name="exemplo_extratos_vps.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.divider()
+
+        # Botão carregar
+        if st.button("✅ Carregar Arquivos", type="primary", use_container_width=True):
+            if not contas_file:
+                st.error("❌ Arquivo de Contas Contábeis é obrigatório!")
+            elif not lancamentos_file:
+                st.error("❌ Arquivo de Lançamentos é obrigatório!")
+            elif not extratos_file:
+                st.error("❌ Arquivo de Extratos é obrigatório!")
+            else:
+                with st.spinner("Carregando arquivos..."):
+                    try:
+                        # Carrega contas contábeis
+                        contas = carregar_contas_contabeis(contas_file)
+                        st.session_state['vps_contas'] = contas
+
+                        # Carrega lançamentos
+                        df_lancamentos = carregar_lancamentos(lancamentos_file)
+                        st.session_state['vps_lancamentos'] = df_lancamentos
+
+                        # Carrega extratos
+                        df_extratos = carregar_extratos(extratos_file)
+                        st.session_state['vps_extratos'] = df_extratos
+
+                        st.success("✅ Arquivos carregados com sucesso!")
+                        st.info(f"📊 {len(df_lancamentos)} lançamentos e {len(df_extratos)} movimentações de extrato carregadas.")
+
+                    except Exception as e:
+                        st.error(f"❌ Erro ao carregar arquivos: {str(e)}")
+
+    # ==========================================================================
+    # ABA 1 - PRÉ-VISUALIZAÇÃO
+    # ==========================================================================
+    with tabs[1]:
+        st.header("👁️ Pré-visualização dos Dados")
+
+        if 'vps_lancamentos' not in st.session_state:
+            st.warning("⚠️ Carregue os arquivos primeiro na aba 'Upload Arquivos'")
+        else:
+            # Lançamentos
+            st.subheader("📋 Lançamentos (Pagamentos)")
+            df_lanc = st.session_state['vps_lancamentos']
+            st.dataframe(df_lanc.head(20), use_container_width=True)
+            st.caption(f"Total: {len(df_lanc)} lançamentos")
+
+            st.divider()
+
+            # Extratos
+            st.subheader("🏦 Extratos Bancários")
+            df_ext = st.session_state['vps_extratos']
+            st.dataframe(df_ext.head(20), use_container_width=True)
+            st.caption(f"Total: {len(df_ext)} movimentações")
+
+            st.divider()
+
+            # Contas Contábeis
+            st.subheader("📚 Contas Contábeis")
+            contas = st.session_state['vps_contas']
+
+            for aba_nome, df_aba in contas.items():
+                with st.expander(f"Aba: {aba_nome}"):
+                    st.dataframe(df_aba, use_container_width=True)
+                    st.caption(f"Total: {len(df_aba)} registros")
+
+    # ==========================================================================
+    # ABA 2 - CONCILIAÇÃO
+    # ==========================================================================
+    with tabs[2]:
+        st.header("🔄 Executar Conciliação")
+
+        if 'vps_lancamentos' not in st.session_state:
+            st.warning("⚠️ Carregue os arquivos primeiro na aba 'Upload Arquivos'")
+        else:
+            st.markdown("""
+            **Processo de Conciliação:**
+            1. Confronta lançamentos da planilha financeira com extratos bancários
+            2. Identifica fornecedores, bancos, datas e valores
+            3. Classifica contas contábeis e históricos
+            4. Gera lançamentos simples (1 débito x 1 crédito) ou compostos (com juros/multas)
+            5. Processa movimentações não conciliadas do extrato
+            """)
+
+            st.divider()
+
+            if st.button("🚀 Iniciar Conciliação", type="primary", use_container_width=True):
+                with st.spinner("Executando conciliação..."):
+                    try:
+                        df_lancamentos = st.session_state['vps_lancamentos'].copy()
+                        df_extratos = st.session_state['vps_extratos'].copy()
+                        contas = st.session_state['vps_contas']
+
+                        # Executa conciliação
+                        df_resultado, stats = conciliar_vps(df_lancamentos, df_extratos, contas)
+
+                        # Salva resultados
+                        st.session_state['vps_resultado'] = df_resultado
+                        st.session_state['vps_stats'] = stats
+
+                        st.success("✅ Conciliação concluída!")
+
+                        # Exibe estatísticas
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Lançamentos Processados", stats['total_lancamentos'])
+                            st.metric("Conciliados", stats['conciliados_lancamento'])
+                        with col2:
+                            st.metric("Extratos Processados", stats['total_extrato'])
+                            st.metric("Conciliados", stats['conciliados_extrato'])
+                        with col3:
+                            st.metric("Não Classificados", stats['nao_classificados'])
+                            st.metric("Valor Total", f"R$ {_fmt_val(stats['valor_total_lancamentos'])}")
+
+                    except Exception as e:
+                        st.error(f"❌ Erro na conciliação: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+
+    # ==========================================================================
+    # ABA 3 - RESULTADO
+    # ==========================================================================
+    with tabs[3]:
+        st.header("📊 Resultado da Conciliação")
+
+        if 'vps_resultado' not in st.session_state:
+            st.warning("⚠️ Execute a conciliação primeiro na aba 'Conciliação'")
+        else:
+            df_resultado = st.session_state['vps_resultado']
+            stats = st.session_state['vps_stats']
+
+            # Estatísticas
+            st.subheader("📈 Estatísticas")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total de Lançamentos", len(df_resultado))
+            with col2:
+                ok = len(df_resultado[df_resultado.get('STATUS', 'OK') == 'OK'])
+                st.metric("Classificados", ok)
+            with col3:
+                nao_class = stats['nao_classificados']
+                st.metric("Não Classificados", nao_class)
+            with col4:
+                st.metric("Taxa de Sucesso", f"{(ok/(len(df_resultado)) * 100):.1f}%" if len(df_resultado) > 0 else "0%")
+
+            st.divider()
+
+            # Visualização dos lançamentos
+            st.subheader("📋 Lançamentos Gerados")
+
+            # Filtro
+            filtro = st.radio("Filtrar por:", ["Todos", "Classificados", "Não Classificados"], horizontal=True)
+
+            if filtro == "Classificados":
+                df_exibir = df_resultado[df_resultado.get('STATUS', 'OK') == 'OK']
+            elif filtro == "Não Classificados":
+                df_exibir = df_resultado[df_resultado.get('STATUS', 'OK') == 'NAO_CLASSIFICADO']
+            else:
+                df_exibir = df_resultado
+
+            # Exibe tabela
+            st.dataframe(df_exibir, use_container_width=True, height=400)
+            st.caption(f"Exibindo {len(df_exibir)} de {len(df_resultado)} lançamentos")
+
+    # ==========================================================================
+    # ABA 4 - EXPORT CSV
+    # ==========================================================================
+    with tabs[4]:
+        st.header("💾 Exportar CSV Padronizado")
+
+        if 'vps_resultado' not in st.session_state:
+            st.warning("⚠️ Execute a conciliação primeiro")
+        else:
+            df_resultado = st.session_state['vps_resultado']
+            stats = st.session_state['vps_stats']
+
+            if stats['nao_classificados'] > 0:
+                st.error(f"❌ Existem {stats['nao_classificados']} lançamentos não classificados!")
+                st.warning("⚠️ Cadastre os fornecedores/históricos faltantes na planilha de Contas Contábeis e refaça a conciliação.")
+            else:
+                st.success("✅ Todos os lançamentos foram classificados!")
+
+                # Prepara CSV
+                df_csv = df_resultado.copy()
+
+                # Remove colunas extras (mantém apenas formato padrão)
+                colunas_padrao = ['DATA', 'COD_CONTA_DEBITO', 'COD_CONTA_CREDITO', 'VALOR', 'COD_HISTORICO', 'COMPLEMENTO', 'INICIA_LOTE']
+                df_csv = df_csv[[c for c in colunas_padrao if c in df_csv.columns]]
+
+                # Remove linhas com STATUS != OK (se existir)
+                if 'STATUS' in df_resultado.columns:
+                    df_csv = df_resultado[df_resultado['STATUS'] == 'OK'][colunas_padrao]
+
+                # Converte para CSV
+                csv_buffer = io.StringIO()
+                df_csv.to_csv(csv_buffer, index=False, sep=';', encoding='utf-8-sig')
+                csv_data = csv_buffer.getvalue()
+
+                # Preview
+                st.subheader("👁️ Preview do CSV")
+                st.dataframe(df_csv.head(20), use_container_width=True)
+                st.caption(f"Total: {len(df_csv)} lançamentos no CSV")
+
+                st.divider()
+
+                # Download
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.download_button(
+                        label="📥 Baixar CSV Padronizado",
+                        data=csv_data,
+                        file_name=f"vps_contabilizacao_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        type="primary",
+                        use_container_width=True
+                    )
+
+    # ==========================================================================
+    # ABA 5 - NÃO CLASSIFICADOS
+    # ==========================================================================
+    with tabs[5]:
+        st.header("⚠️ Lançamentos Não Classificados")
+
+        if 'vps_resultado' not in st.session_state:
+            st.warning("⚠️ Execute a conciliação primeiro")
+        else:
+            df_resultado = st.session_state['vps_resultado']
+
+            # Filtra não classificados
+            if 'STATUS' in df_resultado.columns:
+                df_nao_class = df_resultado[df_resultado['STATUS'] == 'NAO_CLASSIFICADO'].copy()
+            else:
+                df_nao_class = pd.DataFrame()
+
+            if len(df_nao_class) == 0:
+                st.success("✅ Não há lançamentos não classificados!")
+            else:
+                st.error(f"❌ {len(df_nao_class)} lançamentos não foram classificados")
+
+                st.markdown("""
+                **Ações necessárias:**
+                1. Identifique os fornecedores/históricos não cadastrados abaixo
+                2. Adicione-os na planilha de Contas Contábeis
+                3. Faça upload novamente e refaça a conciliação
+                """)
+
+                st.divider()
+
+                # Lista de não classificados
+                st.subheader("📋 Detalhes dos Não Classificados")
+                st.dataframe(df_nao_class, use_container_width=True, height=400)
+
+                # Download CSV com não classificados
+                csv_buffer = io.StringIO()
+                df_nao_class.to_csv(csv_buffer, index=False, sep=';', encoding='utf-8-sig')
+                csv_data = csv_buffer.getvalue()
+
+                st.download_button(
+                    label="📥 Baixar Lista de Não Classificados",
+                    data=csv_data,
+                    file_name=f"vps_nao_classificados_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+
+
+if __name__ == "__main__":
+    mostrar_pagina_vps()
